@@ -51,6 +51,27 @@ The exploded BOM output includes:
 - `STLAL`: BOM alternative
 - `total_cost`: Rolled-up cost for the path
 
+## Streamlit UI
+
+You can interactively explore exploded BOMs and preview source tables using the Streamlit app:
+
+```bash
+streamlit run bom_explorer_app.py
+```
+- Filter by material, plant (WERKS), BOM alternative (STLAL), and date
+- Preview any source table and its fields in the sidebar
+- Download filtered results as CSV
+- Info box explains the tool logic
+
+## Field Explanations
+- **WERKS**: SAP Plant — a physical or logical location for production, inventory, or services.
+- **STLAL**: BOM Alternative — identifies different valid versions of a BOM for the same material and plant.
+
+## SAP Coverage & Advanced Tables
+- This tool covers multi-level, multi-plant, multi-alternative BOM explosion with cost rollup, suitable for most analytics/reporting.
+- Not all advanced SAP features (engineering change management, variant BOMs, etc.) are implemented.
+- **STAS** and **STZU** tables are included for completeness but are not populated unless you implement advanced SAP logic.
+
 ## Example Usage
 
 ```bash

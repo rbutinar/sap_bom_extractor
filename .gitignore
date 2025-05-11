@@ -8,11 +8,13 @@
 /source_data/*.tsv
 !/source_data/.gitkeep
 
-/processed_data/*.csv
 /processed_data/*.parquet
 /processed_data/*.tsv
 !/processed_data/exploded_bom.csv
 !/processed_data/.gitkeep
+
+# Streamlit app
+!bom_explorer_app.py
 
 # Ignore Jupyter notebook checkpoints
 .ipynb_checkpoints/
