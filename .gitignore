@@ -1,0 +1,26 @@
+# Ignore all source and processed data tables
+/source_data/*.csv
+!/source_data/STKO.csv
+!/source_data/STPO.csv
+!/source_data/MAST.csv
+!/source_data/MBEW.csv
+/source_data/*.parquet
+/source_data/*.tsv
+!/source_data/.gitkeep
+
+/processed_data/*.csv
+/processed_data/*.parquet
+/processed_data/*.tsv
+!/processed_data/exploded_bom.csv
+!/processed_data/.gitkeep
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore Python cache and virtual environment
+__pycache__/
+.venv/
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db

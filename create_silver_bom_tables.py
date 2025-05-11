@@ -10,8 +10,8 @@ import pandas as pd
 import numpy as np
 import os
 
-# Ensure data directory exists
-os.makedirs("data", exist_ok=True)
+# Ensure source_data directory exists
+os.makedirs("source_data", exist_ok=True)
 
 
 ## 2. Tabella STKO (testata distinta base)
@@ -19,14 +19,22 @@ os.makedirs("data", exist_ok=True)
 
 stko_columns = ["MATNR", "WERKS", "STLNR", "STLAL", "STLAN", "DATUV", "BMENG"]
 stko_data = [
+    # PL01, main alternative
     ("MAT001", "PL01", "BOM001", "01", "1", pd.Timestamp(date(2020, 1, 1)), 1.0),
     ("MAT002", "PL01", "BOM002", "01", "1", pd.Timestamp(date(2020, 1, 1)), 1.0),
+    # PL02, different alternative for MAT001
+    ("MAT001", "PL02", "BOM101", "01", "1", pd.Timestamp(date(2020, 1, 1)), 1.0),
+    # PL01, alternative BOM for MAT001
+    ("MAT001", "PL01", "BOM002A", "02", "1", pd.Timestamp(date(2021, 1, 1)), 1.0),
+    # PL02, alternative BOM for MAT002
+    ("MAT002", "PL02", "BOM202", "01", "1", pd.Timestamp(date(2020, 1, 1)), 1.0),
+    # Existing
     ("MAT003", "PL01", "BOM003", "01", "1", pd.Timestamp(date(2020, 1, 1)), 1.0),
     ("MAT004", "PL01", "BOM004", "01", "1", pd.Timestamp(date(2020, 1, 1)), 1.0),
     ("MAT005", "PL01", "BOM005", "01", "1", pd.Timestamp(date(2020, 1, 1)), 1.0),
 ]
 stko_df = pd.DataFrame(stko_data, columns=stko_columns)
-stko_df.to_parquet("data/STKO/stko.parquet", index=False)
+stko_df.to_csv("source_data/STKO.csv", index=False)
 
 ## 3. Tabella STPO (componenti)
 
@@ -48,7 +56,7 @@ stpo_data = [
     # MAT006 and MAT007 are leaves (no BOMs)
 ]
 stpo_df = pd.DataFrame(stpo_data, columns=stpo_columns)
-stpo_df.to_parquet("data/STPO/stpo.parquet", index=False)
+stpo_df.to_csv('source_data/STPO.csv', index=False)
 
 ## 4. Tabella MAST (link MATNR → STLNR)
 
@@ -61,7 +69,7 @@ mast_data = [
     ("MAT005", "PL01", "BOM005", "01"),
 ]
 mast_df = pd.DataFrame(mast_data, columns=mast_columns)
-mast_df.to_parquet("data/MAST/mast.parquet", index=False)
+mast_df.to_csv("source_data/MAST.csv", index=False)
 
 
 ## 5. Tabelle STAS / STZU (inizialmente vuote)
@@ -69,9 +77,9 @@ mast_df.to_parquet("data/MAST/mast.parquet", index=False)
 # STAS: per distinte alternative (empty)
 stas_columns = ["STLNR", "STLAL", "PRIOR"]
 stas_df = pd.DataFrame([], columns=stas_columns)
-stas_df.to_parquet("data/STAS/stas.parquet", index=False)
+stas_df.to_csv("source_data/STAS.csv", index=False)
 
 # STZU: modifiche e varianti (engineering change, empty)
 stzu_columns = ["STLNR", "AENNR", "DATUV"]
 stzu_df = pd.DataFrame([], columns=stzu_columns)
-stzu_df.to_parquet("data/STZU/stzu.parquet", index=False)
+stzu_df.to_csv("source_data/STZU.csv", index=False)

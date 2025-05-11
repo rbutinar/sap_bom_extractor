@@ -1,14 +1,43 @@
 import pandas as pd
 from datetime import date
 
-def load_tables():
-    stko = pd.read_parquet('data/STKO/stko.parquet')
-    stpo = pd.read_parquet('data/STPO/stpo.parquet')
-    mast = pd.read_parquet('data/MAST/mast.parquet')
-    return stko, stpo, mast
+# Set the key date for effectivity filtering
+key_date = pd.Timestamp(date(2021, 1, 1))
 
-def explode_bom_leaves(root_matnr, mast, stpo, root_bom=None, level=1, visited=None, leaves=None):
-    # Recursively collect ONLY leaf components for a given root material
+def load_tables():
+    stko = pd.read_csv('source_data/STKO.csv', parse_dates=['DATUV'])
+    stpo = pd.read_csv('source_data/STPO.csv', parse_dates=['DATUV'])
+    mast = pd.read_csv('source_data/MAST.csv')
+    mbew = pd.read_csv('source_data/MBEW.csv')
+    return stko, stpo, mast, mbew
+
+def get_effective_bom_row(matnr, mast, stko, key_date, werks=None, stlal=None):
+    # Find the BOM header for matnr, plant, alt valid at key_date
+    mast_rows = mast[mast['MATNR'] == matnr]
+    if werks is not None:
+        mast_rows = mast_rows[mast_rows['WERKS'] == werks]
+    if stlal is not None:
+        mast_rows = mast_rows[mast_rows['STLAL'] == stlal]
+    if mast_rows.empty:
+        return None, None
+    merged = mast_rows.merge(stko, on=["STLNR", "STLAL", "WERKS"], how="left")
+    valid = merged[merged['DATUV'] <= key_date]
+    if valid.empty:
+        return None, None
+    row = valid.sort_values('DATUV', ascending=False).iloc[0]
+    return row['STLNR'], row
+
+def get_effective_components(bom_id, stpo, key_date):
+    # Get components for this BOM valid at key_date
+    comps = stpo[stpo['STLNR'] == bom_id]
+    valid = comps[comps['DATUV'] <= key_date]
+    # For each POSNR, pick most recent DATUV
+    if valid.empty:
+        return pd.DataFrame()
+    idx = valid.groupby('POSNR')['DATUV'].idxmax()
+    return valid.loc[idx]
+
+def explode_bom_leaves_with_qty(root_matnr, mast, stko, stpo, werks=None, stlal=None, root_bom=None, level=1, visited=None, leaves=None, qty=1.0):
     if visited is None:
         visited = set()
     if leaves is None:
@@ -16,49 +45,63 @@ def explode_bom_leaves(root_matnr, mast, stpo, root_bom=None, level=1, visited=N
     if root_matnr in visited:
         return leaves
     visited.add(root_matnr)
-    mast_row = mast[mast['MATNR'] == root_matnr]
-    if mast_row.empty:
+    bom_id, bom_row = get_effective_bom_row(root_matnr, mast, stko, key_date, werks=werks, stlal=stlal)
+    if bom_id is None:
+        # No BOM, treat as leaf
+        leaves.append({'material': root_matnr, 'bom': root_bom, 'component': root_matnr, 'level': level-1, 'total_quantity': qty})
         return leaves
-    bom_id = mast_row.iloc[0]['STLNR']
-    if root_bom is None:
-        root_bom = bom_id
-    components = stpo[stpo['STLNR'] == bom_id]['IDNRK'].tolist()
-    if not components:
-        leaves.append({'material': root_matnr, 'bom': root_bom, 'component': root_matnr, 'level': level-1})
+    comps = get_effective_components(bom_id, stpo, key_date)
+    if comps.empty:
+        # BOM exists but no components: treat as leaf
+        leaves.append({'material': root_matnr, 'bom': bom_id, 'component': root_matnr, 'level': level-1, 'total_quantity': qty})
         return leaves
-    for comp in components:
-        # For each branch, follow all paths from the root material
-        _explode_bom_path(root_matnr, root_bom, comp, mast, stpo, level+1, set(visited), leaves)
+    for _, comp in comps.iterrows():
+        comp_matnr = comp['IDNRK']
+        comp_qty = comp['MENGE']
+        explode_bom_leaves_with_qty(comp_matnr, mast, stko, stpo, werks=werks, stlal=stlal, root_bom=bom_id, level=level+1, visited=visited, leaves=leaves, qty=qty*comp_qty)
     return leaves
 
-def _explode_bom_path(root_matnr, root_bom, current_matnr, mast, stpo, level, visited, leaves):
-    # Helper for path traversal, always keeps the root material and root BOM
+def _explode_bom_path_with_qty(root_matnr, root_bom, current_matnr, mast, stko, stpo, level, visited, leaves, qty):
     if current_matnr in visited:
         return
     visited.add(current_matnr)
-    mast_row = mast[mast['MATNR'] == current_matnr]
-    if mast_row.empty:
-        # If not found as a parent, treat as a leaf
-        leaves.append({'material': root_matnr, 'bom': root_bom, 'component': current_matnr, 'level': level-1})
+    bom_id, bom_row = get_effective_bom_row(current_matnr, mast, stko, key_date)
+    if bom_row is None:
+        leaves.append({'material': root_matnr, 'bom': root_bom, 'component': current_matnr, 'level': level-1, 'total_quantity': qty})
         return
-    bom_id = mast_row.iloc[0]['STLNR']
-    components = stpo[stpo['STLNR'] == bom_id]['IDNRK'].tolist()
-    if not components:
-        leaves.append({'material': root_matnr, 'bom': root_bom, 'component': current_matnr, 'level': level-1})
+    components = get_effective_components(bom_id, stpo, key_date)
+    if components.empty:
+        leaves.append({'material': root_matnr, 'bom': root_bom, 'component': current_matnr, 'level': level-1, 'total_quantity': qty})
         return
-    for comp in components:
-        _explode_bom_path(root_matnr, root_bom, comp, mast, stpo, level+1, set(visited), leaves)
+    for _, row in components.iterrows():
+        comp = row['IDNRK']
+        comp_qty = row['MENGE']
+        _explode_bom_path_with_qty(root_matnr, root_bom, comp, mast, stko, stpo, level+1, set(visited), leaves, qty * comp_qty)
 
 def main():
-    stko, stpo, mast = load_tables()
+    stko, stpo, mast, mbew = load_tables()
     all_leaves = []
-    for matnr in mast['MATNR'].unique():
-        leaves = explode_bom_leaves(matnr, mast, stpo, level=0)
+    # Loop over all (material, plant, alternative) combinations
+    for _, mast_row in mast.iterrows():
+        matnr = mast_row['MATNR']
+        werks = mast_row['WERKS']
+        stlal = mast_row['STLAL']
+        leaves = explode_bom_leaves_with_qty(matnr, mast, stko, stpo, werks=werks, stlal=stlal, level=0)
+        # Add plant and alternative to each result
+        for leaf in leaves:
+            leaf['WERKS'] = werks
+            leaf['STLAL'] = stlal
         all_leaves.extend(leaves)
     df_leaves = pd.DataFrame(all_leaves)
+
+    # Add cost info: lookup cost for each leaf component by MATNR and BWKEY (plant)
+    df_leaves = df_leaves.merge(mbew[['MATNR', 'BWKEY', 'STPRS']], left_on=['component', 'WERKS'], right_on=['MATNR', 'BWKEY'], how='left')
+    df_leaves['total_cost'] = df_leaves['total_quantity'] * df_leaves['STPRS']
+    df_leaves = df_leaves.drop(['MATNR', 'BWKEY', 'STPRS'], axis=1)
+
     print(df_leaves)
-    df_leaves.to_csv('exploded_bom.csv', index=False)
-    print('\nExploded BOM saved to exploded_bom.csv')
+    df_leaves.to_csv('processed_data/exploded_bom.csv', index=False)
+    print('\nExploded BOM saved to processed_data/exploded_bom.csv')
 
 if __name__ == "__main__":
     main()
