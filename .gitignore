@@ -1,24 +1,9 @@
 # Streamlit app
 !bom_explorer_app.py
 
-# Ignore Jupyter notebook checkpoints
-.ipynb_checkpoints/
-
-# Ignore Python cache and virtual environment
-__pycache__/
 .venv/
-
-# Ignore OS generated files
-.DS_Store
-Thumbs.db
-
-# Ignore Jupyter notebook checkpoints
-.ipynb_checkpoints/
-
-# Ignore Python cache and virtual environment
+venv/
 __pycache__/
-.venv/
-
-# Ignore OS generated files
+.ipynb_checkpoints/
 .DS_Store
 Thumbs.db
