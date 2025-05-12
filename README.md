@@ -7,6 +7,7 @@ This project demonstrates how to extract, transform, and analyze SAP Bill of Mat
 - Multi-plant and multi-alternative BOM support (SAP-style)
 - BOM explosion with effectivity date filtering and cost rollup (from MBEW)
 - Clear separation between raw/source data (`source_data/`) and processed outputs (`processed_data/`)
+- Support for variants (STAS) and engineering changes (STZU)
 
 ## Setup
 
@@ -34,6 +35,7 @@ This project demonstrates how to extract, transform, and analyze SAP Bill of Mat
 - `create_silver_bom_tables.py` — Generates sample BOM tables as CSV files in `source_data/`
 - `preview_tables.py` — Prints the content of all CSV tables for review
 - `explode_bom_multilevel.py` — Recursively explodes BOMs and outputs a flat exploded BOM CSV in `processed_data/`
+- `source_data/` — Contains all raw/source tables (STKO, STPO, MAST, MBEW, STAS, STZU, etc.)
 - `source_data/` — Contains all raw/source tables (STKO, STPO, MAST, MBEW, etc.)
 - `processed_data/` — Contains all processed outputs (e.g., `exploded_bom.csv`)
 - `requirements.txt` — Python dependencies (pandas)

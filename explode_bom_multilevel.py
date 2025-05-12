@@ -9,10 +9,32 @@ def load_tables():
     stpo = pd.read_csv('source_data/STPO.csv', parse_dates=['DATUV'])
     mast = pd.read_csv('source_data/MAST.csv')
     mbew = pd.read_csv('source_data/MBEW.csv')
-    return stko, stpo, mast, mbew
+    stas = pd.read_csv('source_data/STAS.csv')
+    stzu = pd.read_csv('source_data/STZU.csv', parse_dates=['DATUV'])
+    return stko, stpo, mast, mbew, stas, stzu
 
-def get_effective_bom_row(matnr, mast, stko, key_date, werks=None, stlal=None):
-    # Find the BOM header for matnr, plant, alt valid at key_date
+def get_preferred_variant(stlnr, stas, prefer_prior=1):
+    variants = stas[stas['STLNR'] == stlnr]
+    if variants.empty:
+        return None
+    # Scegli la variante con priorità più bassa (più importante)
+    variant = variants.sort_values('PRIOR').iloc[0]
+    return variant['STLAL']
+
+def get_active_change(stlnr, stzu, key_date):
+    changes = stzu[(stzu['STLNR'] == stlnr) & (stzu['DATUV'] <= key_date)]
+    if changes.empty:
+        return None
+    change = changes.sort_values('DATUV', ascending=False).iloc[0]
+    return change
+
+def get_effective_bom_row(matnr, mast, stko, key_date, werks=None, stlal=None, stas=None, stzu=None):
+    # Trova la variante preferita se non specificata
+    if stlal is None and stas is not None:
+        mast_rows = mast[(mast['MATNR'] == matnr)]
+        if not mast_rows.empty:
+            stlnr = mast_rows.iloc[0]['STLNR']
+            stlal = get_preferred_variant(stlnr, stas)
     mast_rows = mast[mast['MATNR'] == matnr]
     if werks is not None:
         mast_rows = mast_rows[mast_rows['WERKS'] == werks]
@@ -25,6 +47,12 @@ def get_effective_bom_row(matnr, mast, stko, key_date, werks=None, stlal=None):
     if valid.empty:
         return None, None
     row = valid.sort_values('DATUV', ascending=False).iloc[0]
+    # Applica eventuale change (STZU)
+    if stzu is not None:
+        change = get_active_change(row['STLNR'], stzu, key_date)
+        if change is not None:
+            row['AENNR'] = change['AENNR']
+            row['DATUV'] = change['DATUV']
     return row['STLNR'], row
 
 def get_effective_components(bom_id, stpo, key_date):
@@ -37,7 +65,7 @@ def get_effective_components(bom_id, stpo, key_date):
     idx = valid.groupby('POSNR')['DATUV'].idxmax()
     return valid.loc[idx]
 
-def explode_bom_leaves_with_qty(root_matnr, mast, stko, stpo, werks=None, stlal=None, root_bom=None, level=1, visited=None, leaves=None, qty=1.0):
+def explode_bom_leaves_with_qty(root_matnr, mast, stko, stpo, werks=None, stlal=None, root_bom=None, level=1, visited=None, leaves=None, qty=1.0, stas=None, stzu=None):
     if visited is None:
         visited = set()
     if leaves is None:
@@ -45,7 +73,7 @@ def explode_bom_leaves_with_qty(root_matnr, mast, stko, stpo, werks=None, stlal=
     if root_matnr in visited:
         return leaves
     visited.add(root_matnr)
-    bom_id, bom_row = get_effective_bom_row(root_matnr, mast, stko, key_date, werks=werks, stlal=stlal)
+    bom_id, bom_row = get_effective_bom_row(root_matnr, mast, stko, key_date, werks=werks, stlal=stlal, stas=stas, stzu=stzu)
     if bom_id is None:
         # No BOM, treat as leaf
         leaves.append({'material': root_matnr, 'bom': root_bom, 'component': root_matnr, 'level': level-1, 'total_quantity': qty})
@@ -58,7 +86,7 @@ def explode_bom_leaves_with_qty(root_matnr, mast, stko, stpo, werks=None, stlal=
     for _, comp in comps.iterrows():
         comp_matnr = comp['IDNRK']
         comp_qty = comp['MENGE']
-        explode_bom_leaves_with_qty(comp_matnr, mast, stko, stpo, werks=werks, stlal=stlal, root_bom=bom_id, level=level+1, visited=visited, leaves=leaves, qty=qty*comp_qty)
+        explode_bom_leaves_with_qty(comp_matnr, mast, stko, stpo, werks=werks, stlal=stlal, root_bom=bom_id, level=level+1, visited=visited, leaves=leaves, qty=qty*comp_qty, stas=stas, stzu=stzu)
     return leaves
 
 def _explode_bom_path_with_qty(root_matnr, root_bom, current_matnr, mast, stko, stpo, level, visited, leaves, qty):
@@ -79,14 +107,14 @@ def _explode_bom_path_with_qty(root_matnr, root_bom, current_matnr, mast, stko, 
         _explode_bom_path_with_qty(root_matnr, root_bom, comp, mast, stko, stpo, level+1, set(visited), leaves, qty * comp_qty)
 
 def main():
-    stko, stpo, mast, mbew = load_tables()
+    stko, stpo, mast, mbew, stas, stzu = load_tables()
     all_leaves = []
     # Loop over all (material, plant, alternative) combinations
     for _, mast_row in mast.iterrows():
         matnr = mast_row['MATNR']
         werks = mast_row['WERKS']
         stlal = mast_row['STLAL']
-        leaves = explode_bom_leaves_with_qty(matnr, mast, stko, stpo, werks=werks, stlal=stlal, level=0)
+        leaves = explode_bom_leaves_with_qty(matnr, mast, stko, stpo, werks=werks, stlal=stlal, level=0, stas=stas, stzu=stzu)
         # Add plant and alternative to each result
         for leaf in leaves:
             leaf['WERKS'] = werks
