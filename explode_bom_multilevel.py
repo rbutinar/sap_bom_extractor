@@ -55,17 +55,25 @@ def get_effective_bom_row(matnr, mast, stko, key_date, werks=None, stlal=None, s
             row['DATUV'] = change['DATUV']
     return row['STLNR'], row
 
-def get_effective_components(bom_id, stpo, key_date):
-    # Get components for this BOM valid at key_date
+def get_effective_components(bom_id, stpo, key_date, stas=None, include_deleted=False):
+    # Se STAS è disponibile, usala come fonte principale per i componenti (con flag cancellazione e quantità storiche)
+    if stas is not None:
+        comps = stas[stas['STLNR'] == bom_id]
+        if not include_deleted:
+            comps = comps[comps['LOEKZ'] != 'X']
+        # Restituisci colonne chiave: POSNR, IDNRK, ALT_MENGE, NEU_MENGE, LOEKZ
+        if comps.empty:
+            return comps
+        return comps[['POSNR','IDNRK','ALT_MENGE','NEU_MENGE','LOEKZ']].copy()
+    # Altrimenti fallback su STPO classico
     comps = stpo[stpo['STLNR'] == bom_id]
     valid = comps[comps['DATUV'] <= key_date]
-    # For each POSNR, pick most recent DATUV
     if valid.empty:
-        return pd.DataFrame()
+        return valid
     idx = valid.groupby('POSNR')['DATUV'].idxmax()
     return valid.loc[idx]
 
-def explode_bom_leaves_with_qty(root_matnr, mast, stko, stpo, werks=None, stlal=None, root_bom=None, level=1, visited=None, leaves=None, qty=1.0, stas=None, stzu=None):
+def explode_bom_leaves_with_qty(root_matnr, mast, stko, stpo, werks=None, stlal=None, root_bom=None, level=1, visited=None, leaves=None, qty=1.0, stas=None, stzu=None, include_deleted=False):
     if visited is None:
         visited = set()
     if leaves is None:
@@ -76,17 +84,24 @@ def explode_bom_leaves_with_qty(root_matnr, mast, stko, stpo, werks=None, stlal=
     bom_id, bom_row = get_effective_bom_row(root_matnr, mast, stko, key_date, werks=werks, stlal=stlal, stas=stas, stzu=stzu)
     if bom_id is None:
         # No BOM, treat as leaf
-        leaves.append({'material': root_matnr, 'bom': root_bom, 'component': root_matnr, 'level': level-1, 'total_quantity': qty})
+        leaves.append({'material': root_matnr, 'bom': root_bom, 'component': root_matnr, 'level': level-1, 'total_quantity': qty, 'deleted': False, 'alt_qty': qty, 'new_qty': qty})
         return leaves
-    comps = get_effective_components(bom_id, stpo, key_date)
+    comps = get_effective_components(bom_id, stpo, key_date, stas=stas, include_deleted=include_deleted)
     if comps.empty:
         # BOM exists but no components: treat as leaf
-        leaves.append({'material': root_matnr, 'bom': bom_id, 'component': root_matnr, 'level': level-1, 'total_quantity': qty})
+        leaves.append({'material': root_matnr, 'bom': bom_id, 'component': root_matnr, 'level': level-1, 'total_quantity': qty, 'deleted': False, 'alt_qty': qty, 'new_qty': qty})
         return leaves
     for _, comp in comps.iterrows():
         comp_matnr = comp['IDNRK']
-        comp_qty = comp['MENGE']
-        explode_bom_leaves_with_qty(comp_matnr, mast, stko, stpo, werks=werks, stlal=stlal, root_bom=bom_id, level=level+1, visited=visited, leaves=leaves, qty=qty*comp_qty, stas=stas, stzu=stzu)
+        comp_alt_qty = comp['ALT_MENGE'] if 'ALT_MENGE' in comp else None
+        comp_new_qty = comp['NEU_MENGE'] if 'NEU_MENGE' in comp else None
+        loekz = comp['LOEKZ'] if 'LOEKZ' in comp else ''
+        deleted = (loekz == 'X') or (comp_new_qty == 0.0) if comp_new_qty is not None else False
+        qty_to_use = comp_new_qty if comp_new_qty is not None else 1.0
+        leaves.append({'material': root_matnr, 'bom': bom_id, 'component': comp_matnr, 'level': level, 'total_quantity': qty*qty_to_use, 'deleted': deleted, 'alt_qty': comp_alt_qty, 'new_qty': comp_new_qty})
+        # Esplodi solo se il componente non è cancellato oppure se include_deleted è True
+        if not deleted:
+            explode_bom_leaves_with_qty(comp_matnr, mast, stko, stpo, werks=werks, stlal=stlal, root_bom=bom_id, level=level+1, visited=visited, leaves=leaves, qty=qty*qty_to_use, stas=stas, stzu=stzu, include_deleted=include_deleted)
     return leaves
 
 def _explode_bom_path_with_qty(root_matnr, root_bom, current_matnr, mast, stko, stpo, level, visited, leaves, qty):
@@ -106,7 +121,7 @@ def _explode_bom_path_with_qty(root_matnr, root_bom, current_matnr, mast, stko, 
         comp_qty = row['MENGE']
         _explode_bom_path_with_qty(root_matnr, root_bom, comp, mast, stko, stpo, level+1, set(visited), leaves, qty * comp_qty)
 
-def main():
+def main(include_deleted=False):
     stko, stpo, mast, mbew, stas, stzu = load_tables()
     all_leaves = []
     # Loop over all (material, plant, alternative) combinations
@@ -114,7 +129,7 @@ def main():
         matnr = mast_row['MATNR']
         werks = mast_row['WERKS']
         stlal = mast_row['STLAL']
-        leaves = explode_bom_leaves_with_qty(matnr, mast, stko, stpo, werks=werks, stlal=stlal, level=0, stas=stas, stzu=stzu)
+        leaves = explode_bom_leaves_with_qty(matnr, mast, stko, stpo, werks=werks, stlal=stlal, level=0, stas=stas, stzu=stzu, include_deleted=include_deleted)
         # Add plant and alternative to each result
         for leaf in leaves:
             leaf['WERKS'] = werks
@@ -132,4 +147,8 @@ def main():
     print('\nExploded BOM saved to processed_data/exploded_bom.csv')
 
 if __name__ == "__main__":
-    main()
+    import sys
+    include_deleted = False
+    if len(sys.argv) > 1 and sys.argv[1] == "--include_deleted":
+        include_deleted = True
+    main(include_deleted=include_deleted)
